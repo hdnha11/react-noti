@@ -1,0 +1,38 @@
+body {
+  padding-top: 70px;
+
+  &.full-page {
+    padding-top: 40px;
+    padding-bottom: 40px;
+    min-height: 0;
+    background-color: #eee;
+  }
+}
+
+.w-xl {
+  width: 320px;
+}
+
+.b-light {
+  border-color: #edf1f2;
+}
+
+.bg-light {
+  color: #58666e;
+  background-color: #edf1f2;
+}
+
+.bg-white {
+  color: #58666e;
+  background-color: #fff;
+}
+
+.m-r {
+  margin-right: 15px;
+}
+
+@media(max-width: 767px) {
+  .pull-right-xs {
+    float: right !important;
+  }
+}
