@@ -4,28 +4,20 @@ var path = require('path');
 const app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
+var MongoClient = require('mongodb').MongoClient;
+var ObjectId = require('mongodb').ObjectId;
+var db;
 
-var notifications = [{
-  id: 1,
-  imageContent: 'https://www.gravatar.com/avatar/205e460b479e2e5b48aec07710c08d50',
-  textContent: 'Facere deserunt sit quisquam vero tenetur dignissimos',
-  time: new Date(),
-  isRead: false
-}, {
-  id: 2,
-  imageContent: null,
-  textContent: 'Necessitatibus numquam eum veniam minus doloribus',
-  time: new Date(),
-  isRead: false
-}, {
-  id: 3,
-  imageContent: null,
-  textContent: 'Quidem dolorem eum reprehenderit ex sint ab',
-  time: new Date(),
-  isRead: false
-}];
-
-var newComingNotificationCount = 3;
+function countUnshownNotification(callback) {
+  db.collection('notifications').find({
+    isShow: false
+  }).count(function (error, count) {
+    if (error) {
+      return console.error(error);
+    }
+    callback(count);
+  });
+}
 
 function notifyNewCountUpdated(newCount) {
   io.sockets.emit('new-count-updated', newCount);
@@ -81,53 +73,94 @@ app.get(/^\/(?!api).*/, function (req, res) {
 });
 
 app.get('/api/notifications', function (req, res) {
-  res.json({
-    notifications: notifications,
-    newCount: newComingNotificationCount
+  db.collection('notifications').find().toArray(function (error, items) {
+    var notifications = items.map(function (item) {
+      item.id = item._id;
+      return item;
+    });
+    countUnshownNotification(function (newCount) {
+      res.json({
+        notifications: notifications,
+        newCount: newCount
+      });
+    });
   });
 });
 
 app.post('/api/notifications', function (req, res) {
   var newNotification = req.body;
 
-  newNotification.id = notifications[notifications.length - 1].id + 1;
   newNotification.time = new Date();
   newNotification.isRead = false;
-  notifications.push(newNotification);
+  newNotification.isShow = false;
 
-  newComingNotificationCount++;
+  db.collection('notifications').insert(newNotification, function (error, result) {
+    if (error) {
+      return console.error(error);
+    }
 
-  notifyNewNotification(newNotification, newComingNotificationCount);
+    var insertedNotification = result.ops[0];
+    insertedNotification.id = insertedNotification._id;
 
-  res.json(newNotification);
+    countUnshownNotification(function (newCount) {
+      notifyNewNotification(insertedNotification, newCount);
+    });
+
+    res.json(insertedNotification);
+  })
 });
 
 app.get('/api/notifications/:id', function (req, res) {
-  var notificationId = parseInt(req.params.id, 10);
+  var notificationId = new ObjectId(req.params.id);
 
-  res.json(notifications.filter(function (notification) {
-    return notification.id === notificationId;
-  })[0]);
+  db.collection('notifications').findOne({
+    _id: notificationId
+  }, function (error, notification) {
+    notification.id = notification._id;
+    res.json(notification);
+  });
 });
 
 app.put('/api/notifications/:id/read', function (req, res) {
-  var notificationId = parseInt(req.params.id, 10);
-  var notification = notifications.filter(function (notification) {
-    return notification.id === notificationId;
-  })[0];
+  var notificationId = new ObjectId(req.params.id);
 
-  notification.isRead = true;
-
-  notifyNotificationUpdated(notification);
-
-  res.json(notification);
+  db.collection('notifications').update({
+    _id: notificationId
+  }, {
+    $set: {
+      isRead: true,
+      isShow: true
+    }
+  }, function (error) {
+    if (error) {
+      return console.error(error);
+    }
+    db.collection('notifications').findOne({
+      _id: notificationId
+    }, function (error, notification) {
+      notification.id = notification._id;
+      notifyNotificationUpdated(notification);
+      res.json(notification);
+    });
+  });
 });
 
 app.post('/api/notifications/reset/counter', function (req, res) {
-  newComingNotificationCount = 0;
-  notifyNewCountUpdated(0);
 
-  res.json(true);
+  db.collection('notifications').update({
+    isShow: false
+  }, {
+    $set: {
+      isShow: true
+    }
+  }, function (error) {
+    if (error) {
+      return console.error(error);
+    }
+    notifyNewCountUpdated(0);
+
+    res.json(true);
+  });
 });
 
 /**
@@ -149,9 +182,17 @@ app.use(function (err, req, res) {
  */
 io.on('connection', function (socket) {
   // Push current state
-  socket.emit('current-state', {
-    notifications,
-    newCount: newComingNotificationCount
+  db.collection('notifications').find().toArray(function (error, items) {
+    var notifications = items.map(function (item) {
+      item.id = item._id;
+      return item;
+    });
+    countUnshownNotification(function (newCount) {
+      socket.emit('current-state', {
+        notifications,
+        newCount: newCount
+      });
+    });
   });
 
   socket.on('disconnect', function () {
@@ -164,7 +205,15 @@ io.on('connection', function (socket) {
 /**
  * Start Server
  */
-const port = 8888;
-http.listen(port, function () {
-  console.log('Visit: localhost:' + port);
+const PORT = 8888;
+const MONGODB_URL = 'mongodb://testuser:testuser%40123@ds023432.mlab.com:23432/react-noti-app';
+
+MongoClient.connect(MONGODB_URL, function (error, database) {
+  if (error) {
+    return console.error(error);
+  }
+  db = database;
+  http.listen(PORT, function () {
+    console.log('Visit: localhost:' + PORT);
+  });
 });
